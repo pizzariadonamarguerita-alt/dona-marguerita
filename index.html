@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pagamento - Dona Marguerita</title>
+  <script src="https://sdk.mercadopago.com/js/v2"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #f8f9fa; color: #333; }
+    .card { width: 100%; max-width: 480px; padding: 24px; background: #fff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); box-sizing: border-box; }
+    h2 { text-align: center; margin-top: 0; color: #111; font-size: 1.4rem; }
+    .amount-display { text-align: center; font-size: 1.4rem; font-weight: bold; color: #009ee3; margin-bottom: 20px; background: #eef9ff; padding: 12px; border-radius: 8px; }
+    .input-group { margin-bottom: 20px; }
+    label { font-weight: 600; display: block; margin-bottom: 8px; font-size: 0.95rem; }
+    input[type="number"] { width: 100%; padding: 12px; font-size: 1.1rem; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+    button.btn-next { width: 100%; padding: 12px; background: #009ee3; color: white; border: none; font-size: 1rem; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 12px; }
+    button.btn-next:hover { background: #0081b8; }
+    #pix-result { text-align: center; display: none; }
+    #pix-result img { max-width: 200px; margin: 15px 0; border: 1px solid #ddd; border-radius: 8px; padding: 8px; }
+    .copy-box { background: #eee; padding: 10px; word-break: break-all; font-family: monospace; border-radius: 6px; font-size: 0.85rem; margin-bottom: 12px; }
+    .btn-copy { background: #28a745; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; width: 100%; }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h2>Dona Marguerita</h2>
+    
+    <div id="amount-container" class="amount-display" style="display: none;">
+      Total: R$ <span id="display-value">0,00</span>
+    </div>
+
+    <!-- Se não houver valor no link, pede para digitar -->
+    <div id="valor-step" class="input-group">
+      <label for="order-amount">Valor do Pedido (R$):</label>
+      <input type="number" id="order-amount" placeholder="Ex: 23.50" step="0.01" min="1">
+      <button class="btn-next" onclick="confirmarValorManual()">Avançar para Pagamento</button>
+    </div>
+
+    <!-- Contêiner do Payment Brick -->
+    <div id="paymentBrick_container"></div>
+
+    <!-- Área de exibição do Pix Copia e Cola -->
+    <div id="pix-result">
+      <h3 style="color: #28a745;">Pix Gerado com Sucesso!</h3>
+      <p>Escaneie o QR Code ou copie o código abaixo para pagar no app do seu banco:</p>
+      <img id="pix-qr-img" src="" alt="QR Code Pix">
+      <div id="pix-code" class="copy-box"></div>
+      <button class="btn-copy" onclick="copiarPix()">Copiar Código Pix</button>
+    </div>
+  </div>
+
+  <script>
+    // Cole sua Public Key de produção abaixo (garanta que esteja exatamente entre as aspas)
+    const PUBLIC_KEY = 'APP_USR-dadbe924-0a0d-4cd2-b22d-3bb1233eb04c';
+    const mp = new MercadoPago(PUBLIC_KEY, { locale: 'pt-BR' });
+
+    let finalAmount = 0;
+
+    // Puxa o valor se enviado via URL (ex: donamarguerita.netlify.app/?valor=23.50)
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlValor = urlParams.get('valor');
+
+    if (urlValor && !isNaN(parseFloat(urlValor)) && parseFloat(urlValor) > 0) {
+      finalAmount = parseFloat(urlValor);
+      document.getElementById('valor-step').style.display = 'none';
+      exibirValorEIniciar(finalAmount);
+    }
+
+    function confirmarValorManual() {
+      const valInput = document.getElementById('order-amount').value;
+      const val = parseFloat(valInput);
+      if (isNaN(val) || val <= 0) {
+        alert('Por favor, digite um valor válido.');
+        return;
+      }
+      finalAmount = val;
+      document.getElementById('valor-step').style.display = 'none';
+      exibirValorEIniciar(finalAmount);
+    }
+
+    function exibirValorEIniciar(valor) {
+      document.getElementById('display-value').innerText = valor.toFixed(2).replace('.', ',');
+      document.getElementById('amount-container').style.display = 'block';
+      carregarPaymentBrick(valor);
+    }
+
+    async function carregarPaymentBrick(amount) {
+      const bricksBuilder = mp.bricks();
+      
+      const settings = {
+        initialization: {
+          amount: Number(amount),
+        },
+        customization: {
+          visual: { style: { theme: 'default' } },
+          paymentMethods: {
+            ticket: "none",       // Desativa boleto
+            bankTransfer: "all",  // Pix
+            creditCard: "all",    // Cartão de crédito
+            debitCard: "all"     // Cartão de débito
+          },
+        },
+        callbacks: {
+          onReady: () => {
+            console.log('Brick carregado com sucesso!');
+          },
+          onSubmit: ({ selectedPaymentMethod, formData }) => {
+            return new Promise((resolve, reject) => {
+              fetch("/.netlify/functions/process-payment", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(formData),
+              })
+                .then((response) => response.json())
+                .then((data) => {
+                  if (data.status === 'approved') {
+                    alert('🎉 Pagamento APROVADO! Seu pedido já está em preparação.');
+                    location.reload();
+                  } else if (data.point_of_interaction?.transaction_data) {
+                    const pixData = data.point_of_interaction.transaction_data;
+                    document.getElementById('paymentBrick_container').style.display = 'none';
+                    document.getElementById('pix-qr-img').src = `data:image/png;base64,${pixData.qr_code_base64}`;
+                    document.getElementById('pix-code').innerText = pixData.qr_code;
+                    document.getElementById('pix-result').style.display = 'block';
+                  } else {
+                    alert('Status da transação: ' + (data.status_detail || data.status));
+                  }
+                  resolve();
+                })
+                .catch((err) => {
+                  console.error(err);
+                  alert('Ocorreu um erro ao processar o pagamento.');
+                  reject();
+                });
+            });
+          },
+          onError: (error) => {
+            console.error('Erro no Brick:', error);
+          },
+        },
+      };
+
+      try {
+        window.paymentBrickController = await bricksBuilder.create('payment', 'paymentBrick_container', settings);
+      } catch (e) {
+        console.error('Falha ao instanciar Brick:', e);
+      }
+    }
+
+    function copiarPix() {
+      const pixCode = document.getElementById('pix-code').innerText;
+      navigator.clipboard.writeText(pixCode);
+      alert('Código Pix copiado!');
+    }
+  </script>
+</body>
+</html>
